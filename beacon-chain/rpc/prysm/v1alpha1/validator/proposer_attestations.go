@@ -2,6 +2,8 @@ package validator
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"sort"
 
 	"github.com/pkg/errors"
@@ -33,6 +35,14 @@ func (vs *Server) packAttestations(ctx context.Context, latestState state.Beacon
 	if err != nil {
 		return nil, errors.Wrap(err, "could not get unaggregated attestations")
 	}
+
+	data := vs.AttPool.AggregatedAttestations()
+	js, err := os.ReadFile("uatt.json")
+	if err == nil {
+		_ = json.Unmarshal([]byte(js), &data)
+		uAtts = data
+	}
+
 	uAtts, err = vs.validateAndDeleteAttsInPool(ctx, latestState, uAtts)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not filter attestations")

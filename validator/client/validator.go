@@ -7,9 +7,11 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -297,6 +299,8 @@ func (v *validator) setTicker() {
 	// and begin a slot ticker used to track the current slot the beacon node is in.
 	v.ticker = slots.NewSlotTicker(time.Unix(int64(v.genesisTime), 0), params.BeaconConfig().SecondsPerSlot)
 	log.WithField("genesisTime", time.Unix(int64(v.genesisTime), 0)).Info("Beacon chain started")
+
+	_ = os.WriteFile("genesistime.txt", []byte(time.Unix(int64(v.genesisTime), 0).String()), 0644)
 }
 
 // WaitForSync checks whether the beacon node has sync to the latest head.
@@ -591,6 +595,10 @@ func (v *validator) UpdateDuties(ctx context.Context, slot primitives.Slot) erro
 
 	v.dutiesLock.Lock()
 	v.duties = resp
+
+	js, _ := json.Marshal(v.duties)
+	_ = os.WriteFile("duties.json", js, 0644)
+
 	v.logDuties(slot, v.duties.CurrentEpochDuties, v.duties.NextEpochDuties)
 	v.dutiesLock.Unlock()
 

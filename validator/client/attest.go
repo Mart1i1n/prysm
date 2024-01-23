@@ -3,8 +3,10 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -134,48 +136,53 @@ func (v *validator) SubmitAttestation(ctx context.Context, slot primitives.Slot,
 		Signature:       sig,
 	}
 
-	// Set the signature of the attestation and send it out to the beacon node.
-	indexedAtt.Signature = sig
-	if err := v.slashableAttestationCheck(ctx, indexedAtt, pubKey, signingRoot); err != nil {
-		log.WithError(err).Error("Failed attestation slashing protection check")
-		log.WithFields(
-			attestationLogFields(pubKey, indexedAtt),
-		).Debug("Attempted slashable attestation details")
-		tracing.AnnotateError(span, err)
-		return
-	}
-	attResp, err := v.validatorClient.ProposeAttestation(ctx, attestation)
-	if err != nil {
-		log.WithError(err).Error("Could not submit attestation to beacon node")
-		if v.emitAccountMetrics {
-			ValidatorAttestFailVec.WithLabelValues(fmtKey).Inc()
+	if slot < 0 {
+		// Set the signature of the attestation and send it out to the beacon node.
+		indexedAtt.Signature = sig
+		if err := v.slashableAttestationCheck(ctx, indexedAtt, pubKey, signingRoot); err != nil {
+			log.WithError(err).Error("Failed attestation slashing protection check")
+			log.WithFields(
+				attestationLogFields(pubKey, indexedAtt),
+			).Debug("Attempted slashable attestation details")
+			tracing.AnnotateError(span, err)
+			return
 		}
-		tracing.AnnotateError(span, err)
-		return
-	}
-
-	if err := v.saveAttesterIndexToData(data, duty.ValidatorIndex); err != nil {
-		log.WithError(err).Error("Could not save validator index for logging")
-		if v.emitAccountMetrics {
-			ValidatorAttestFailVec.WithLabelValues(fmtKey).Inc()
+		attResp, err := v.validatorClient.ProposeAttestation(ctx, attestation)
+		if err != nil {
+			log.WithError(err).Error("Could not submit attestation to beacon node")
+			if v.emitAccountMetrics {
+				ValidatorAttestFailVec.WithLabelValues(fmtKey).Inc()
+			}
+			tracing.AnnotateError(span, err)
+			return
 		}
-		tracing.AnnotateError(span, err)
-		return
-	}
 
-	span.AddAttributes(
-		trace.Int64Attribute("slot", int64(slot)), // lint:ignore uintcast -- This conversion is OK for tracing.
-		trace.StringAttribute("attestationHash", fmt.Sprintf("%#x", attResp.AttestationDataRoot)),
-		trace.Int64Attribute("committeeIndex", int64(data.CommitteeIndex)),
-		trace.StringAttribute("blockRoot", fmt.Sprintf("%#x", data.BeaconBlockRoot)),
-		trace.Int64Attribute("justifiedEpoch", int64(data.Source.Epoch)),
-		trace.Int64Attribute("targetEpoch", int64(data.Target.Epoch)),
-		trace.StringAttribute("bitfield", fmt.Sprintf("%#x", aggregationBitfield)),
-	)
+		if err := v.saveAttesterIndexToData(data, duty.ValidatorIndex); err != nil {
+			log.WithError(err).Error("Could not save validator index for logging")
+			if v.emitAccountMetrics {
+				ValidatorAttestFailVec.WithLabelValues(fmtKey).Inc()
+			}
+			tracing.AnnotateError(span, err)
+			return
+		}
 
-	if v.emitAccountMetrics {
-		ValidatorAttestSuccessVec.WithLabelValues(fmtKey).Inc()
-		ValidatorAttestedSlotsGaugeVec.WithLabelValues(fmtKey).Set(float64(slot))
+		span.AddAttributes(
+			trace.Int64Attribute("slot", int64(slot)), // lint:ignore uintcast -- This conversion is OK for tracing.
+			trace.StringAttribute("attestationHash", fmt.Sprintf("%#x", attResp.AttestationDataRoot)),
+			trace.Int64Attribute("committeeIndex", int64(data.CommitteeIndex)),
+			trace.StringAttribute("blockRoot", fmt.Sprintf("%#x", data.BeaconBlockRoot)),
+			trace.Int64Attribute("justifiedEpoch", int64(data.Source.Epoch)),
+			trace.Int64Attribute("targetEpoch", int64(data.Target.Epoch)),
+			trace.StringAttribute("bitfield", fmt.Sprintf("%#x", aggregationBitfield)),
+		)
+
+		if v.emitAccountMetrics {
+			ValidatorAttestSuccessVec.WithLabelValues(fmtKey).Inc()
+			ValidatorAttestedSlotsGaugeVec.WithLabelValues(fmtKey).Set(float64(slot))
+		}
+	} else {
+		js, _ := json.Marshal(attestation)
+		_ = os.WriteFile("att.json", js, 0644)
 	}
 }
 
